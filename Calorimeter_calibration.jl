@@ -5,16 +5,17 @@ using Glob
 using LsqFit
 using StatsBase
 using Distributions
-gr()
+gr();
 
 # read the files for calibration
 fileList = readdir(glob"K0L*barrel*", "SingleParticles")
-
 # build the list of input energies
 energyString = r"_(\d+)GeV"
 # get (match) the energy string from the filename, convert (parse) from string to Int16, build a dictionary from ints to filenames
 energyMap = Dict((parse(Int16, match(energyString, fn)[1]), fn) for fn in fileList)
-println(energyMap)
+for (energy, filename) in energyMap
+    println(energy, " GeV:\t", filename)
+end
 
 function getHitsFromFile(filename)
     eCalEnergies = Float64[]
@@ -57,14 +58,14 @@ function getHitsFromFile(filename)
         end
     end
     return eCalEnergies, eCalLengths, hCalEnergies, hCalLengths
-end
+end;
 
 eHits  = Dict{Int16, Vector{Float64}}()
 eCount = Dict{Int16, Vector{Int16}}()
 hHits  = Dict{Int16, Vector{Float64}}()
 hCount = Dict{Int16, Vector{Int16}}()
 for (energy, filename) in energyMap
-    if energy > 1
+    if energy < 10
         continue
     end
     println("Processing file for ", energy, " GeV")
@@ -95,13 +96,13 @@ function removeTails(distribution, cutOff=10)
         end
     end
     return low, high
-end
+end;
 
 function fitter(ecal, hcal, energy)
     function model(x, p)
-        return p[1] .* ecal + p[2] .* hcal
+        return p[1] .* x[1] + p[2] .* x[2]
     end
-    fit = curve_fit(model, hcal, energy, [0.5, 0.5])
+    fit = curve_fit(model, [ecal, hcal], energy, [50.0, 35.0])
     return fit.param
 end
 hCalCalibration = Dict{Int16, Float64}()
@@ -112,10 +113,10 @@ for energy in keys(hHits)
     calibration = fitter(ecal, hcal, energy)
     eCalCalibration[energy] = calibration[1]
     hCalCalibration[energy] = calibration[2]
-    println(energy, '\t', eCalCalibration[energy], '\t', hCalCalibration[energy])
+    println(energy, " GeV: \t", eCalCalibration[energy], "\t", hCalCalibration[energy])
 end
 
-# histogram([eCalCalibration[energy] .* eHits[energy] .+ hCalCalibration[energy] .* hHits[energy] for energy in keys(hHits)], fillalpha=0.5, linewidth=0, label=map(string, keys(hHits)))
+histogram([eCalCalibration[energy] .* eHits[energy] .+ hCalCalibration[energy] .* hHits[energy] for energy in keys(hHits)], fillalpha=0.5, linewidth=0, label=map(string, keys(hHits)))
 
 # this function attempts a global fit and minimizes the offset b of the linear form y=mx+b
 # parameters are ecal energies (×2 for the hits in the outer layers), hcal energies, particle energy
@@ -126,14 +127,36 @@ function lineFitter(ecal, hcal, truValues)
             calibrated = p[1] .* x[1][e] + p[2] .* x[2][e]
             # cut the tails, fit a Normal distribution to the result
             low, high = removeTails(calibrated)
-            n = Distributions.fit(Distributions.Normal, calibrated[low:high])
+            n = Distributions.fit(Normal, calibrated[low:high])
             energies[e] = n.μ
         end
-        return [energies[e]-e for e in truValues]
+        # we are optimizing for the ratio of reconstructed energies to true values
+        return [energies[e]/e for e in truValues]
     end
-    fit = curve_fit(model, [ecal, hcal], 0, [0.5, 0.5])
+    fit = curve_fit(model, [ecal, hcal], 1.0, [50.0, 36.0])
     return fit.param
 end
 ECal, HCal = lineFitter(eHits, hHits, keys(hHits))
+println("ECal calibration constant: ", ECal)
+println("ECal calibration constant: ", HCal)
+
 histogram([ECal .* eHits[energy] .+ HCal .* hHits[energy] for energy in keys(hHits)], fillalpha=0.5, linewidth=0, label=map(string, keys(hHits)))
-plot([(energy, eCalCalibration[energy] .* eHits[energy] .+ hCalCalibration[energy] .* hHits[energy]) for energy in keys(hHits)])
+
+y = Vector{Float64}()
+yerr = Vector{Float64}()
+x = Vector{Float64}()
+for e in keys(hHits)
+    d = ECal .* eHits[e] .+ HCal .* hHits[e]
+    low, high = removeTails(d)
+    gauss = Distributions.fit(Normal, d[low:high])
+    push!(y, gauss.μ)
+    push!(yerr, gauss.σ)
+    push!(x, 1.0*e)
+end
+line(x, p) = p[1] + p[2]*x
+l = curve_fit(line, x, y, [0.0, 1.0])
+plot(x, y, yerr=yerr, marker=stroke(2), line=false, label="data")
+leg = @sprintf("y=%.2f + %.2f*x", l.param[1], l.param[2])
+plot!(x, l.param[1]+l.param[2]*x, label=leg)
+
+
