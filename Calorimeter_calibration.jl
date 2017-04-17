@@ -32,13 +32,13 @@ function getHitsFromFile(filename)
             eCalEnergy = 0.0
             eCalLength = 0
             # sum up the uncalibrated HCalHits
-            for hit in getCollection(event, "HcalBarrelHits")
+            for hit in getCollection(event, "HCalBarrelHits")
                 hCalEnergy += getEnergy(hit)
                 hCalLength += 1
             end
             # sum up the uncalibrated ECalHits
             # this needs to be sorted by layer, so we need a decoder
-            EcalBarrelHits = getCollection(event, "EcalBarrelHits")
+            EcalBarrelHits = getCollection(event, "ECalBarrelHits")
             decode = CellIDDecoder(EcalBarrelHits)
             for hit in EcalBarrelHits
                 # calibrate the hits in the later layers with a higher number,
@@ -138,7 +138,7 @@ function lineFitter(ecal, hcal, truValues)
 end
 ECal, HCal = lineFitter(eHits, hHits, keys(hHits))
 println("ECal calibration constant: ", ECal)
-println("ECal calibration constant: ", HCal)
+println("HCal calibration constant: ", HCal)
 
 histogram([ECal .* eHits[energy] .+ HCal .* hHits[energy] for energy in keys(hHits)], fillalpha=0.5, linewidth=0, label=map(string, keys(hHits)))
 
